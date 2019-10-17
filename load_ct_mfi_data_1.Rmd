@@ -24,8 +24,8 @@ library(knitr)
 
 
 
-```{r eval=FALSE, include=FALSE}
-# This chunk downloads and loads all Connecticut Municipal Fiscal Indicator databases from https://portal.ct.gov/OPM/IGP-MUNFINSR/Municipal-Financial-Services/Municipal-Fiscal-Indicators into folder called ct_mfi. Eval for this chunk set to FALSE so reset when using for first time.
+```{r 'download-mfi', eval=FALSE, include=FALSE}
+# This chunk downloads and loads all Connecticut Municipal Fiscal Indicator databases from https://portal.ct.gov/OPM/IGP-MUNFINSR/Municipal-Financial-Services/Municipal-Fiscal-Indicators into folder called ct_mfi. Eval for this chunk set to FALSE so reset when using for first time. Please note that this file will be approx. 95MB, but can be discarded afterwards.
 
 # Set working dir or add it if doesn't exist
 # Please change maindir to your working dir
