@@ -1,0 +1,197 @@
+---
+title: "R Notebook"
+output:
+  html_document:
+    df_print: paged
+---
+
+```{r 'setup', message=FALSE, warning=FALSE, include=FALSE}
+require("knitr")
+require("MarkdownReports")
+opts_knit$set(root.dir = "~/Desktop/David/Projects/ct_muni")
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+
+
+```{r 'libraries', message=FALSE, warning=FALSE, include=FALSE}
+library(data.table)
+library(ggplot2)
+library(stringr)
+library(knitr)
+library(DT)
+```
+
+
+
+```{r 'load-mfi-data', message=FALSE, warning=FALSE, include=FALSE}
+data <-
+  readRDS("/Users/davidlucey/Desktop/David/Projects/ct_muni/data/ct_mfi_DT.RDS")
+names(data) <- c("ct_mfi_DT","ct_mfi_pension_DT","ct_mfi_opeb_DT")
+list2env(data,envir=.GlobalEnv)
+rm(data)
+```
+
+
+```{r 'ct_real_estate', message=FALSE, warning=FALSE, include=FALSE}
+
+# Load all CT Housing sales since 2001 for calculation and addition of median values
+ct_re <- 
+  fread("~/Desktop/David/Projects/ct_real_estate/Real_Estate_Sales_2001-2017.csv")
+
+# Filter for single family and select variables
+ct_re <- ct_re[str_detect(ResidentialType, "Family")][
+      ][, c("DateRecorded",
+           "Town",
+           "AssessedValue",
+           "SaleAmount",
+           "SalesRatio",
+           "NonUseCode")]
+
+# Drop duplicate rows
+ct_re <- unique(ct_re)
+
+# Replace some missing SalesAmount when SalesRatio is available
+ct_re[is.na(SaleAmount),SaleAmount:=AssessedValue/SalesRatio]
+
+# Add fisc_year_end from DateRecorded field & choose only items which are arms 
+# length of transactions (ie: NonUseCode 0, "", NA)
+ct_re <- 
+  ct_re[,fisc_year_end:=str_extract(DateRecorded,"\\d{4}")][
+    ][NonUseCode %in% c("","0",NA)]
+
+# Change names to Formatting for display in table
+setnames(ct_re,c("Town","fisc_year_end"),
+         c("Municipality","Fiscal Year"))
+
+# Calc median value by muni and year
+ct_re <-
+  ct_re[, .(Median = median(SaleAmount, na.rm = TRUE)),
+        .(`Municipality`, `Fiscal Year`)]
+
+```
+
+
+
+```{r 'calc_combo', message=FALSE, warning=FALSE, include=FALSE}
+
+# Function to calculate Yankee score with input of year and ct_mfi data
+calc_combo <- function(dt){
+  
+  # Function to add scores for arc, gf, lto, enemp, and homeval.
+  arc <- function(A, arc_min, arc_slp, arc_wt)
+    max(min(0, (A - arc_min) / arc_slp), arc_wt)
+  gf <- function(B, gf_min, gf_slp, gf_wt)
+    min(max(0, (B - gf_min) / gf_slp), gf_wt)
+  lto <- function(C, ltoblig_min, ltoblig_slp, ltoblig_wt)
+    min(max(0, (C - ltoblig_min) / ltoblig_slp), ltoblig_wt)
+  unemp <- function(D, unemp_min, unemp_slp, unemp_wt)
+    min(max(0, (D - unemp_min) / unemp_slp), unemp_wt)
+  homeval <- function(E, homeval_min, homeval_slp, homeval_wt)
+    min(max(0, (E - homeval_min) / homeval_slp), homeval_wt)
+  
+  # unify names
+  setnames(dt, "Municipality", "municipality")
+  
+  # load Yankee score calculation frame from xlsx, make and clean names
+  frame <- readxl::read_xlsx("data/yankee-frame.xlsx")
+  names(frame)[1] <- "municipality"
+  names(frame) <- str_extract(names(frame), "\\w{1,}")
+  frame <- frame[!str_detect(names(frame), "\\d")][, c(1:21)]
+  names(frame)[2:6] <- paste0(names(frame)[2:6], "_wt")
+  names(frame)[7:11] <- paste0(names(frame)[7:11], "_min")
+  names(frame)[12:16] <- paste0(names(frame)[12:16], "_max")
+  names(frame)[17:21] <- paste(names(frame)[17:21], "_slp")
+  frame <- janitor::clean_names(frame)
+  frame <- setDT(frame)
+  
+  # combine yankee score calc frame with
+  combo <- dt[frame, on = "municipality"]
+  combo[, arc_score := mapply(arc, A, arc_min, arc_slp, arc_wt)]
+  combo[, gf_score := mapply(gf, B, gf_min, gf_slp, gf_wt)]
+  combo[, lto_score := mapply(lto, C, ltoblig_min, ltoblig_slp, ltoblig_wt)]
+  combo[, unemp_score := mapply(unemp, D, unemp_min, unemp_slp, unemp_wt)]
+  combo[, homeval_score := mapply(homeval, E, homeval_min, homeval_slp, homeval_wt)]
+  combo[, score := mapply(sum, arc_score, gf_score, lto_score, unemp_score, homeval_score)]
+  
+  return(combo)
+}
+
+```
+
+
+
+```{r 'yankee', message=FALSE, warning=FALSE, include=FALSE}
+
+# Build yankee dataset for 2009-2017 joining ct_mfi_pension, 
+# ct_mfi_opeb, ct_re on `Fiscal Year` and `Municipality`
+yankee <-
+  ct_mfi_pension_DT[ct_mfi_DT, on = c("Fiscal Year", "Municipality")]
+yankee <- 
+  ct_mfi_opeb_DT[yankee, on = c("Fiscal Year", "Municipality")]
+yankee <- 
+  ct_re[yankee, on = c("Fiscal Year", "Municipality")]
+
+# Order by `Fiscal Year` and setkeys
+yankee <- yankee[order(`Fiscal Year`)]
+setkeyv(yankee, c("Fiscal Year", "Municipality"))
+
+#Calc lag of unemployment and median home
+cols = c("Unempl.", "Median")
+lagcols = paste("lag", cols, sep = "_")
+yankee[, (lagcols) := shift(.SD, 1, 0, "lag"), .SDcols = cols, by = "Municipality"]
+
+#Add A-E variables as calculated by Yankee Warning Signs for all years
+yankee[, `:=`(
+  A = rowSums(yankee[, .(`Pension Cont. Req.`, `OPEB Cont. Req.`)], na.rm =
+                TRUE) / `Total Rev.`,
+  B = `Total Funded Bal` / `Total Exp.`,
+  C = rowSums(yankee[, .(`Total Bond. Debt`, `Net Pension Liab.`, `Net OPEB Liab.`)], na.rm = TRUE) / `Total Rev.`,
+  D = `Unempl.` - lag_Unempl.,
+  E = (`Median` - lag_Median) / lag_Median
+)]
+
+#Add score calc using calc_combo function by year in yankee list
+year <- as.character(c(2001:2017))
+yankee_list <- yankee[, list(list(.SD)), by = "Fiscal Year"]
+yankee <- lapply(yankee_list$V1, calc_combo)
+names(yankee) <- year
+yankee <- rbindlist(yankee, use.names = TRUE, idcol = "fisc_year_end")
+
+#Drop duplicates rows
+yankee <- unique(yankee)
+
+#Format variables for datatable and charts display
+yankee[, `:=`(
+  `Fiscal Year` = fisc_year_end,
+  `Municipality` = municipality,
+  `Score` = score,
+  `LTO Score` = lto_score,
+  `Unempl. Score` = unemp_score,
+  `Home Val. Score` = homeval_score,
+  `Arc Score` = arc_score,
+  `GF Score` = gf_score
+)]
+
+#Remove duplicate unformatted columns no longer needed
+yankee <-
+  yankee[, .SD, .SDcols = !patterns("score|year|muni|max$|min$|wt$|slp$|^lag|Median|UnemplPopu")]
+
+#Summary of unique levels and NA's
+yankee[, lapply(.SD, uniqueN)][, melt(.SD)][order(value)]
+yankee[, lapply(.SD, function(x)
+  (sum(is.na(x))) / .N)][][, melt(.SD)][order(-value) & value > 0][][, .(variable, format(value, scientific = FALSE))]
+
+
+#Clean up  
+rm(yankee_list)
+```
+
+
+```{r 'save-yankee', message=FALSE, warning=FALSE, include=FALSE}
+openxlsx::write.xlsx(yankee, file = "/Users/davidlucey/Desktop/David/Projects/ct_muni/yankee_shiny/yankee.xlsx")
+fwrite(yankee, "data/yankee.csv")
+```
+
+
+

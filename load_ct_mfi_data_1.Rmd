@@ -1,0 +1,521 @@
+---
+title: "R Notebook"
+output:
+  html_document:
+    df_print: paged
+---
+
+```{r 'setup', message=FALSE, warning=FALSE, include=FALSE}
+require("knitr")
+require("MarkdownReports")
+opts_knit$set(root.dir = "~/Desktop/David/Projects/ct_muni")
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+
+
+```{r 'libraries', message=FALSE, warning=FALSE, include=FALSE}
+library(data.table)
+library(ggplot2)
+library(stringr)
+library(knitr)
+
+```
+
+
+
+```{r 'extract_tables', message=FALSE, warning=FALSE, include=FALSE}
+# Function to read and merge CT mfi statements from MS Access
+extract_tables <- function(x) {
+  
+  # Get table names
+  table_names <- Hmisc::mdb.get(x, tables = TRUE)
+  # Select tables with mfi data based on regex
+  table_names <-
+    stringr::str_extract_all(table_names, "FISCIN\\d{2}", simplify = TRUE)[, 1]
+  table_names <- table_names[table_names != ""]
+  # Extract selected table_names
+  table <-
+    Hmisc::mdb.get(x,
+                   tables = table_names,
+                   allow = TRUE,
+                   lowernames = TRUE)
+  # Strip labels and create table names_list
+  table <- lapply(table, Hmisc::cleanup.import)
+  names_list <- lapply(table, names)
+  names_list <-
+    lapply(names_list, stringr::str_remove, pattern = "[[:digit:]]+")
+  # Convert underlying add names to data.tables
+  table <- lapply(table, as.data.table)
+  table <- mapply(function(x, y)
+    setnames(x, y), table, names_list)
+  # Clean names
+  table <- lapply(table, janitor::clean_names, case = "snake")
+}
+
+```
+
+
+
+
+```{r 'load_data', include=FALSE}
+# Import, merge and drop duplicate years using extract_tables
+
+#directory with data
+subdir <- "/Users/davidlucey/Desktop/David/Projects/ct_muni/data/ct_mfi/"
+
+#Load 17 yrs MFI data
+ct_mfi <-
+  do.call("c" , lapply(list.files(subdir, full.names = TRUE), extract_tables))
+ct_mfi <- lapply(ct_mfi, expss::drop_all_labels)
+ct_mfi <- lapply(ct_mfi, as.data.table)
+ct_mfi  <- rbindlist(ct_mfi,
+                     fill = TRUE,
+                     use.names = TRUE,
+                     idcol = "ID")
+
+#Replace fisc_year_end with idcol 
+ct_mfi[, fisc_year_end := paste0("20", stringr::str_extract(ID, "[[:digit:]]+"))]
+
+#Unique rows to take out duplicate year
+ct_mfi <- unique(ct_mfi, by = c("fisc_year_end", "municipality"))
+
+# Clean duplicate variables in mfi
+change_in_net_assets <-
+  names(ct_mfi)[stringr::str_detect(names(ct_mfi), "change") &
+                  stringr::str_detect(names(ct_mfi), "net")]
+ct_mfi <-
+  ct_mfi[, change_in_net_assets := apply(.SD, 1, function(x)
+    na.omit(x)[1]),
+    .SDcols = change_in_net_assets, 
+      by = c("municipality", "fisc_year_end")][
+          ][, .SD, .SDcols = !names(ct_mfi) %in% change_in_net_assets[2]]
+
+total_net_assets <-
+  names(ct_mfi)[stringr::str_detect(names(ct_mfi), "total") &
+                  stringr::str_detect(names(ct_mfi), "net") &
+                  stringr::str_detect(names(ct_mfi), "assets|position")]
+ct_mfi <-
+  ct_mfi[, total_net_assets := apply(.SD, 1, function(x)
+    na.omit(x)[1]), .SDcols = total_net_assets, 
+    by = c("municipality", "fisc_year_end")][
+      ][, .SD, .SDcols = !names(ct_mfi) %in% total_net_assets[2]]
+
+unrestricted_net_assets <- names(ct_mfi)[stringr::str_detect(names(ct_mfi),"unrestricted" )& stringr::str_detect(names(ct_mfi), "net")]
+ct_mfi <-
+  ct_mfi[, unrestricted_net_assets := apply(.SD, 1, function(x)
+    na.omit(x)[1]), .SDcols = unrestricted_net_assets, 
+    by = c("municipality", "fisc_year_end")][
+      ][, .SD, .SDcols = !names(ct_mfi) %in% unrestricted_net_assets]
+
+tanf <- names(ct_mfi)[stringr::str_detect(names(ct_mfi), "tfa")
+                      | stringr::str_detect(names(ct_mfi), "tanf")]
+ct_mfi <-
+  ct_mfi[, tanf := apply(.SD, 1, function(x)
+    na.omit(x)[1]),
+    .SDcols = tanf, by = c("municipality", "fisc_year_end")][
+    ][, .SD, .SDcols = !names(ct_mfi) %in% tanf]
+
+patterns <- c("capital", "rsd", "unrestricted")
+for (pattern in patterns) {
+  vars <- names(ct_mfi)[stringr::str_detect(names(ct_mfi), pattern)]
+  ct_mfi[, (pattern) := apply(.SD, 1, function(x)
+    na.omit(x)[1]), .SDcols = vars, by = c("municipality", "fisc_year_end")][
+      ][, .SD, .SDcols = !names(ct_mfi) %in% vars]
+}
+
+#Change Moody vars to chr and coalesc
+factors <- c(
+  "moody_s_bond_ratings_july",
+  "moody_s_bond_ratings_june",
+  "moody_s_bond_ratings_nov",
+  "moody_s_bond_ratings_latest",
+  "date_of_latest_moody_s_ratings",
+  "moody_s_bond_ratings_dec",
+  "acmr"
+)
+ct_mfi[, (factors) := lapply(.SD, function(x)
+  levels(x)[as.numeric(x)]), .SDcols = factors]
+moody <-
+  names(ct_mfi)[stringr::str_detect(names(ct_mfi), "moody") &
+                  !stringr::str_detect(names(ct_mfi), "date")]
+ct_mfi <-
+  ct_mfi[, moody := apply(.SD, 1, function(x)
+    na.omit(x)[1]), .SDcols = moody, 
+    by = c("municipality", "fisc_year_end")][
+      ][, .SD, .SDcols = !names(ct_mfi) %in% moody]
+ct_mfi[,moody := ifelse(moody=="","None",moody)]
+#ct_mfi$moodys <- ordered(ct_mfi$moodys_ratings, levels=c("None","Aaa", "Aa1",  "Aa2",  "Aa3",  "AA3", "A1", "A2", "A3","Baa1", "Baa2", "Baa3","Ba2"))
+
+ct_mfi[,`:=`(municipality=stringr::str_to_title(municipality),
+             ID=NULL)][,.SD,.SDcols=!patterns("fund_bal")]
+
+vars <-
+  c(
+    "fisc_year_end",
+    "municipality",
+    "total_revenue",
+    "total_expenditures",
+    "total_bonded_long_term_debt_rsd_town",
+    "total_fund_bal",
+    "unrestricted",
+    "empl",
+    "total_net_assets",
+    "change_in_net_assets",
+    "total_net_pension_liability",
+    "population",
+    "capital"
+  )
+ct_mfi <- ct_mfi[, population := x_population][, ..vars]
+
+ct_mfi_DT  <-
+  ct_mfi[, .(
+    `Fiscal Year` = fisc_year_end,
+    `Municipality` = municipality,
+    `Total Rev.` = total_revenue,
+    `Total Exp.` = total_expenditures,
+    `Total Bond. Debt` = total_bonded_long_term_debt_rsd_town,
+    `Total Funded Bal` = total_fund_bal,
+    `Unrestricted` = unrestricted,
+    `Unempl.` = empl,
+    `Total Net Asset` = total_net_assets,
+    `Chg. Net Asset` = change_in_net_assets,
+    `Net Pension Liab.` = total_net_pension_liability,
+    `Popu.` = population,
+    `Capital Inv.` = capital
+  )]
+
+rm(
+  change_in_net_assets,
+  total_net_assets,
+  unrestricted_net_assets,
+  factors,
+  moody,
+  pattern,
+  patterns,
+  subdir,
+  tanf
+)
+
+```
+
+
+
+
+
+```{r 'extract_pension', message=FALSE, warning=FALSE, include=FALSE}
+extract_pension <- function(x){
+  
+  # Get table names from Microsoft Access db
+  tables <-
+    Hmisc::mdb.get(x,
+                   tables = TRUE,
+                   allow = TRUE,
+                   lowernames = TRUE)
+  # Filter names with word "Pension"
+  pension_tables <- tables[stringr::str_detect(tables, "Pension")]
+  # Futher filter for word "Data"
+  pension_tables <-
+    pension_tables[stringr::str_detect(pension_tables, "Data")]
+  # Name based on year extracted regex
+  table_names <-
+    stringr::str_extract_all(pension_tables, "\\d{4}", simplify = TRUE)[, 1]
+  # Get pension tables from Microsoft access
+  table <- Hmisc::mdb.get(x, tables = pension_tables)
+  
+  # Strip labels from variables
+  if (inherits(table, "list")) {
+    table <- lapply(table, as.matrix)
+  } else {
+    table <- table
+  }
+  if (inherits(table, "list")) {
+    table <- lapply(table, as.data.table)
+  } else {
+    table <- table
+  }
+  if (!inherits(table, "list"))
+    table <- list(table)
+  # Name tables and clean underlying data.table names
+  names(table) <- table_names
+  table <- lapply(table, janitor::clean_names, case = "snake")
+  table
+}
+
+```
+
+
+
+```{r 'load-pension', message=FALSE, warning=FALSE, include=FALSE}
+
+#Extract pension data from ct_mfi file
+subdir <-
+  "/Users/davidlucey/Desktop/David/Projects/ct_muni/data/ct_mfi"
+ct_mfi_pension <-
+  do.call("c" , lapply(list.files(subdir, full.names = TRUE), extract_pension))
+names <- names(ct_mfi_pension)
+
+#Eliminate labels by converting to matrix then data.table
+ct_mfi_pension <- lapply(ct_mfi_pension, as.matrix)
+ct_mfi_pension <- lapply(ct_mfi_pension, as.data.table)
+names(ct_mfi_pension) <- names
+
+#Add all years back together in data.table names by year
+ct_mfi_pension <-
+  rbindlist(ct_mfi_pension,
+            use.names = TRUE,
+            fill = TRUE,
+            idcol = "year")
+ct_mfi_pension <-
+  unique(ct_mfi_pension, by = c("year", "entity", "plan_name"))
+setnames(ct_mfi_pension,
+         c("entity", "year"),
+         c("municipality", "fisc_year_end"))
+
+#Coalesce variables which have different names in different annual tables
+ct_mfi_pension <-
+  ct_mfi_pension[, `:=`
+                 (
+                   emplyr_cont_req =
+                     as.numeric(
+                       dplyr::coalesce(req_d_emplyr_contrib,
+                                       emplyr_required_adc_gasb67)
+                     ),
+                   emplyr_cont_made =
+                     as.numeric(
+                       dplyr::coalesce(emplyr_contrib_made,
+                                       emplyr_contribution_gasb67)
+                     ),
+                   pension_net_ass =
+                     as.numeric(
+                       dplyr::coalesce(
+                         gasb5_net_assets,
+                         gasb27_asset_value,
+                         plan_fiduciary_net_position_gasb6768
+                       )
+                     ),
+                   pension_liab = as.numeric(
+                     dplyr::coalesce(gasb27_aal,
+                                     total_pension_liability_gasb6768)
+                   ),
+                   number_of_members = as.numeric(number_of_members),
+                   inv_returns = as.numeric(investment_rate_of_return_gasb6768),
+                   municipality = str_to_title(municipality)
+                 )]
+
+#Select cols to keep
+cols <- c(
+  "fisc_year_end",
+  "municipality",
+  "number_of_members",
+  "emplyr_cont_req",
+  "emplyr_cont_made",
+  "pension_liab",
+  "pension_net_ass",
+  "inv_returns"
+)
+ct_mfi_pension <- ct_mfi_pension[, ..cols]
+
+
+#Aggregate numeric by town/year
+cols <- c(
+  "emplyr_cont_req",
+  "emplyr_cont_made",
+  "number_of_members",
+  "pension_liab",
+  "pension_net_ass"
+)
+pension_data <-
+  ct_mfi_pension[, lapply(.SD, sum, na.rm = TRUE),
+                 .SDcols = cols,
+                 .(fisc_year_end, municipality)]
+
+#Aggregate mean by town/year
+inv_returns <-
+  ct_mfi_pension[, (mean(inv_returns, na.rm = TRUE) * 100),
+                 .(fisc_year_end, municipality)]
+
+#Rebuild with town/year aggregations
+ct_mfi_pension <- data.table(pension_data,
+                             inv_returns = inv_returns$V1)
+
+ct_mfi_pension_DT <-
+  ct_mfi_pension[, .(
+    `Fiscal Year` = fisc_year_end,
+    `Municipality` = municipality,
+    `Covered Part.` = number_of_members,
+    `Pension Cont. Req.` = emplyr_cont_req,
+    `Pension Cont. Made.` = emplyr_cont_made,
+    `Pension Cont. Percent` = emplyr_cont_req / emplyr_cont_made,
+    `Pension Liab.` = pension_liab,
+    `Pension Net Asset` = pension_net_ass,
+    `Pension Return Ass.` = inv_returns,
+    `Net Pension Liab.` = pension_liab - pension_net_ass,
+    `Percent Funded` = pension_net_ass / pension_liab
+  )]
+
+#Cleanup
+rm(inv_returns,pension_data)
+
+```
+
+
+# Summary of Pension Liability missing pre and post GASB6768
+
+```{r 'pension_missing', eval=FALSE, message=FALSE, warning=FALSE, include=FALSE}
+library(dplyr)
+m <- ct_mfi_pension[, .SD, .SDcols = patterns("pension|year")] %>%
+  group_by(fisc_year_end) %>%
+  skimr::skim_to_list()
+m
+```
+
+
+```{r 'extract_opeb', message=FALSE, warning=FALSE, include=FALSE}
+
+# Function to extract tables with OPEB data from CT Microsoft Access databases
+extract_opeb <- function(x) {
+  
+  # Get table names
+  tables <-
+    Hmisc::mdb.get(x,
+                   tables = TRUE,
+                   allow = TRUE,
+                   lowernames = TRUE)
+  
+  # Separate tables with OPEB data
+  opeb_tables <-
+    tables[stringr::str_detect(tables, "OPEB|opeb|Opeb")]
+  # Further separate tables with "Data" in name
+  opeb_tables <-
+    opeb_tables[stringr::str_detect(opeb_tables, "Data")]
+  
+  # Get "OPEB Data" tables from database and clean labels 
+  if (length(opeb_tables) > 0) {
+    table <- Hmisc::mdb.get(x, tables = opeb_tables)
+  } else {
+    table <- list()
+  }
+  if (inherits(table, "list") & length(table) > 0) {
+    table <- lapply(table, as.matrix)
+  } else {
+    table <- as.matrix(table)
+  }
+  if (inherits(table, "list") & length(table) > 0) {
+    table <- lapply(table, as.data.table)
+  } else {
+    table <- as.data.table(table)
+  }
+  if (!inherits(table, "list")) {
+    table <- list(table)
+    names(table) <- opeb_tables
+  }
+  
+  # Drop faulty tables which don't have appropriate rows/cols
+  table <- table[unlist(lapply(table,ncol))>10]
+  table <- table[unlist(lapply(table,nrow))>100]
+  
+  # Clean names
+  table <- lapply(table, janitor::clean_names, case="snake")
+  table
+}
+```
+
+
+
+```{r 'load-opeb', echo=FALSE, message=FALSE, warning=FALSE}
+
+# Extract opeb data from ct_mfi file and build data.table
+subdir <-
+  "/Users/davidlucey/Desktop/David/Projects/ct_muni/data/ct_mfi"
+ct_mfi_opeb <-
+  do.call("c" , lapply(list.files(subdir, full.names = TRUE), extract_opeb))
+names(ct_mfi_opeb) <-
+  stringr::str_extract(names(ct_mfi_opeb), "\\d{4}")
+ct_mfi_opeb <-
+  rbindlist(ct_mfi_opeb,
+            use.names = TRUE,
+            fill = TRUE,
+            idcol = "year")
+
+# Clean up, transform and select vars to keep based on pattern
+ct_mfi_opeb <- unique(ct_mfi_opeb, by = c("year", "entity", "plan_name"))
+setnames(ct_mfi_opeb,
+         c("year", "entity"),
+         c("fisc_year_end", "municipality"))
+
+pattern <-
+  "emplyr_contrib|aal|asset_value|year|municipality|members|contrib"
+ct_mfi_opeb <-
+  ct_mfi_opeb[, .SD, .SDcol = patterns(pattern)][
+              ][, municipality := str_to_title(municipality)]
+
+# Convert numeric
+cols <-
+  c(
+    "req_d_emplyr_contrib",
+    "emplyr_contrib_made",
+    "gasb45_aal",
+    "gasb45_asset_value",
+    "number_of_members",
+    "contrib_percentage"
+  )
+ct_mfi_opeb[, (cols) := lapply(.SD, as.numeric), .SDcols = cols]
+
+# Aggregate columns by year/municipality
+cols <-
+  c(
+    "req_d_emplyr_contrib",
+    "emplyr_contrib_made",
+    "gasb45_aal",
+    "gasb45_asset_value",
+    "number_of_members"
+  )
+opeb_data <-
+  ct_mfi_opeb[, lapply(.SD, sum, na.rm = TRUE), .SDcol = cols, .(fisc_year_end, municipality)][order(fisc_year_end)]
+
+# Build dataframe names with tickmarks for display in DT datatable
+contrib <-
+  ct_mfi_opeb[, mean(contrib_percentage, na.rm = TRUE), 
+              .(fisc_year_end, municipality)][
+                ][order(fisc_year_end)]
+ct_mfi_opeb_DT <- data.table(opeb_data, contrib)
+ct_mfi_opeb_DT  <-
+  ct_mfi_opeb_DT[, .(
+    `Fiscal Year` = fisc_year_end,
+    `Municipality` = municipality,
+    `OPEB Covered Part.` = number_of_members,
+    `Emplyee. OPEB Cont.` = V1 * 100,
+    `OPEB Cont. Req.` = req_d_emplyr_contrib,
+    `OPEB Cont. Made.` = emplyr_contrib_made,
+    `OPEB Cont. Percent.` =
+      emplyr_contrib_made / req_d_emplyr_contrib,
+    `OPEB Liab.` = gasb45_aal,
+    `OPEB Net Asset` = gasb45_asset_value,
+    `Net OPEB Liab.` = gasb45_aal - gasb45_asset_value,
+    `OPEB Percent Funded` = gasb45_asset_value / gasb45_aal
+  )]
+
+#Clean up
+rm(contrib,opeb_data)
+
+```
+
+
+# Number of towns with GASB45 AAL
+
+```{r 'opeb_missing', eval=FALSE, message=FALSE, warning=FALSE, include=FALSE}
+library(dplyr)
+m1 <- ct_mfi_opeb[, .SD, .SDcols = patterns("aal|year")] %>%
+  group_by(fisc_year_end) %>%
+  skimr::skim_to_list()
+m1
+```
+
+
+```{r 'save-empl-liab_data', message=FALSE, warning=FALSE, include=FALSE}
+saveRDS(list(ct_mfi_DT,ct_mfi_pension_DT,ct_mfi_opeb_DT),"data/ct_mfi_DT.RDS")
+```
+
+
+
