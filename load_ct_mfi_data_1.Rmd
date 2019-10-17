@@ -24,6 +24,74 @@ library(knitr)
 
 
 
+```{r eval=FALSE, include=FALSE}
+# This chunk downloads and loads all Connecticut Municipal Fiscal Indicator databases from https://portal.ct.gov/OPM/IGP-MUNFINSR/Municipal-Financial-Services/Municipal-Fiscal-Indicators into folder called ct_mfi. Eval for this chunk set to FALSE so reset when using for first time.
+
+# Set working dir or add it if doesn't exist
+# Please change maindir to your working dir
+maindir <- "/Users/davidlucey/Desktop/David/Projects/ct_muni/data" 
+subdir <- "/ct_mfi/"
+
+if (file.exists(paste0(maindir, subdir))){
+    setwd(file.path(maindir, subdir))
+} else {
+    dir.create(file.path(maindir, subdir))
+    setwd(file.path(maindir, subdir))
+}
+
+dir <- paste0(maindir,subdir)
+filenames <- c("ct_mfi_2003-07.mdb",
+               "ct_mfi_2004-08.mdb",
+               "ct_mfi_2005-09.mdb",
+               "ct_mfi_2006-10.mdb",
+               "ct_mfi_2007-11.mdb",
+               "ct_mfi_2008-12.mdb",
+               "ct_mfi_2009-13.mdb",
+               "ct_mfi_2010-14.zip",
+               "ct_mfi_2011-15.zip",
+               "ct_mfi_2012-16.zip",
+               "ct_mfi_2013-17.mdb")
+destfiles <- paste0(dir,filenames)
+
+urls <- 
+  c("https://data.ct.gov/download/psxm-7fts/application%2Fx-msaccess",
+  "https://data.ct.gov/download/bc78-tqqq/application%2Fx-msaccess",
+  "https://data.ct.gov/download/dbri-78cv/application%2Fx-msaccess",
+  "https://data.ct.gov/download/uqc4-jsmd/application%2Fx-msaccess",
+  "https://data.ct.gov/download/vwi6-xdyb/application%2Fx-msaccess",
+  "https://data.ct.gov/download/9dwj-2peu/application%2Fx-msaccess",
+  "https://data.ct.gov/download/5tjw-635p/application%2Fx-msaccess",
+  "https://data.ct.gov/download/3322-gw6v/application%2Fzip",
+  "https://data.ct.gov/download/uij9-wzqw/application%2Fzip",
+  "https://data.ct.gov/download/x5e2-4aw5/application%2Fzip",
+  "https://data.ct.gov/download/sxe5-hth8/application%2Fx-msaccess")
+
+# Download all Connecticut mfi files to ct_mfi file
+mapply(function(url, destfile) download.file(url = url, destfile = destfile), urls, destfiles)
+
+# Unzip and rename three files which were only avail in zipped format
+# Names to be given to files
+filenames <- c("ct_mfi_2010-14.mdb",
+               "ct_mfi_2011-15.mdb",
+               "ct_mfi_2012-16.mdb")
+
+# Zipfiles which have been downloaded to ct_mfi and need further processing
+zipfiles <- paste0(dir,list.files(path=dir,pattern="zip$"))
+
+# Unzip, rename and delete leftover zip file
+mapply(function(zipfile,filename) {
+  unzip(zipfile,exdir=dir) 
+  newfile <- list.files(dir)[!str_detect(list.files(dir),"^ct_mfi_")]
+  file.rename(paste0(dir,newfile), paste0(dir,filename))
+  file.remove(zipfile)
+  }, zipfiles,filenames)
+
+
+```
+
+
+
+
 ```{r 'extract_tables', message=FALSE, warning=FALSE, include=FALSE}
 # Function to read and merge CT mfi statements from MS Access
 extract_tables <- function(x) {
@@ -57,12 +125,11 @@ extract_tables <- function(x) {
 
 
 
-
 ```{r 'load_data', include=FALSE}
 # Import, merge and drop duplicate years using extract_tables
 
 #directory with data
-subdir <- "/Users/davidlucey/Desktop/David/Projects/ct_muni/data/ct_mfi/"
+subdir <- "/Users/davidlucey/Desktop/David/Projects/ct_muni/data/ct_mfi"
 
 #Load 17 yrs MFI data
 ct_mfi <-
@@ -510,6 +577,14 @@ m1 <- ct_mfi_opeb[, .SD, .SDcols = patterns("aal|year")] %>%
   group_by(fisc_year_end) %>%
   skimr::skim_to_list()
 m1
+```
+
+
+
+```{r 'cleanup', include=FALSE}
+#Cleanup
+rm(list= ls()[grepl("file|dir|cols|names|urls|vars",ls())])
+
 ```
 
 
