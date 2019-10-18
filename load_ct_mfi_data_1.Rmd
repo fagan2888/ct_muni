@@ -223,6 +223,7 @@ vars <-
     "municipality",
     "total_revenue",
     "total_expenditures",
+    "debt_service",
     "total_bonded_long_term_debt_rsd_town",
     "total_fund_bal",
     "unrestricted",
@@ -241,6 +242,7 @@ ct_mfi_DT  <-
     `Municipality` = municipality,
     `Total Rev.` = total_revenue,
     `Total Exp.` = total_expenditures,
+    `Debt Service` = debt_service,
     `Total Bond. Debt` = total_bonded_long_term_debt_rsd_town,
     `Total Funded Bal` = total_fund_bal,
     `Unrestricted` = unrestricted,
@@ -413,7 +415,7 @@ ct_mfi_pension_DT <-
     `Covered Part.` = number_of_members,
     `Pension Cont. Req.` = emplyr_cont_req,
     `Pension Cont. Made.` = emplyr_cont_made,
-    `Pension Cont. Percent` = emplyr_cont_req / emplyr_cont_made,
+    `Pension Cont. Percent` = emplyr_cont_made / emplyr_cont_req,
     `Pension Liab.` = pension_liab,
     `Pension Net Asset` = pension_net_ass,
     `Pension Return Ass.` = inv_returns,
@@ -583,7 +585,7 @@ m1
 
 ```{r 'cleanup', include=FALSE}
 #Cleanup
-rm(list= ls()[grepl("file|dir|cols|names|urls|vars",ls())])
+rm(list= ls()[grepl("file|dir|cols|names|urls|vars|pattern",ls())])
 
 ```
 
