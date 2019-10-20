@@ -24,6 +24,7 @@ library(DT)
 
 
 
+
 ```{r 'load-mfi-data', message=FALSE, warning=FALSE, include=FALSE}
 data <-
   readRDS("/Users/davidlucey/Desktop/David/Projects/ct_muni/data/ct_mfi_DT.RDS")
@@ -80,7 +81,7 @@ calc_combo <- function(dt){
   
   # Function to add scores for arc, gf, lto, enemp, and homeval.
   arc <- function(A, arc_min, arc_slp, arc_wt)
-    max(min(0, (A - arc_min) / arc_slp), arc_wt)
+    min(max(0, (A - arc_min) / arc_slp), arc_wt)
   gf <- function(B, gf_min, gf_slp, gf_wt)
     min(max(0, (B - gf_min) / gf_slp), gf_wt)
   lto <- function(C, ltoblig_min, ltoblig_slp, ltoblig_wt)
@@ -105,6 +106,9 @@ calc_combo <- function(dt){
   frame <- janitor::clean_names(frame)
   frame <- setDT(frame)
   
+  frame[,`:=`(arc_min=.20,arc_max=0.15)][
+    ][,arc_slp:=(arc_max-arc_min)/arc_wt]
+
   # combine yankee score calc frame with
   combo <- dt[frame, on = "municipality"]
   combo[, arc_score := mapply(arc, A, arc_min, arc_slp, arc_wt)]
@@ -143,7 +147,7 @@ yankee[, (lagcols) := shift(.SD, 1, 0, "lag"), .SDcols = cols, by = "Municipalit
 
 #Add A-E variables as calculated by Yankee Warning Signs for all years
 yankee[, `:=`(
-  A = rowSums(yankee[, .(`Pension Cont. Req.`, `OPEB Cont. Req.`)], na.rm =
+  A = rowSums(yankee[, .(`Pension Cont. Req.`, `OPEB Cont. Req.`, `Debt Service`)], na.rm =
                 TRUE) / `Total Rev.`,
   B = `Total Funded Bal` / `Total Exp.`,
   C = rowSums(yankee[, .(`Total Bond. Debt`, `Net Pension Liab.`, `Net OPEB Liab.`)], na.rm = TRUE) / `Total Rev.`,
@@ -179,9 +183,9 @@ yankee <-
 
 #Summary of unique levels and NA's
 yankee[, lapply(.SD, uniqueN)][, melt(.SD)][order(value)]
-yankee[, lapply(.SD, function(x)
-  (sum(is.na(x))) / .N)][][, melt(.SD)][order(-value) & value > 0][][, .(variable, format(value, scientific = FALSE))]
-
+yankee[, lapply(.SD, function(x) (sum(is.na(x))) / .N)][
+    ][, melt(.SD)][order(-value) & value > 0][
+     ][, .(variable, format(value, scientific = FALSE))]
 
 #Clean up  
 rm(yankee_list)
@@ -189,7 +193,9 @@ rm(yankee_list)
 
 
 ```{r 'save-yankee', message=FALSE, warning=FALSE, include=FALSE}
+# Save file for shiny app (yankee_shiny)
 openxlsx::write.xlsx(yankee, file = "/Users/davidlucey/Desktop/David/Projects/ct_muni/yankee_shiny/yankee.xlsx")
+# Save Yankee for later usage
 fwrite(yankee, "data/yankee.csv")
 ```
 

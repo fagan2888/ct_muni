@@ -347,24 +347,24 @@ ct_mfi_pension <-
                  (
                    emplyr_cont_req =
                      as.numeric(
-                       dplyr::coalesce(req_d_emplyr_contrib,
+                       fcoalesce(req_d_emplyr_contrib,
                                        emplyr_required_adc_gasb67)
                      ),
                    emplyr_cont_made =
                      as.numeric(
-                       dplyr::coalesce(emplyr_contrib_made,
+                       fcoalesce(emplyr_contrib_made,
                                        emplyr_contribution_gasb67)
                      ),
                    pension_net_ass =
                      as.numeric(
-                       dplyr::coalesce(
+                       fcoalesce(
                          gasb5_net_assets,
                          gasb27_asset_value,
                          plan_fiduciary_net_position_gasb6768
                        )
                      ),
                    pension_liab = as.numeric(
-                     dplyr::coalesce(gasb27_aal,
+                     fcoalesce(gasb27_aal,
                                      total_pension_liability_gasb6768)
                    ),
                    number_of_members = as.numeric(number_of_members),
