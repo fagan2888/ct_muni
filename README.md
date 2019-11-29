@@ -17,5 +17,7 @@ risk scores will be similar to what would have been calculated by the Yankee Ins
 used in the Shiny app (yankee_shiny). See the blogpost for further detail: 
 [Replicating Yankee Institute Risk Score over 15 Years](https://redwallanalytics.com/2019/10/12/replicating-yankee-institute-risk-score-over-15-years/)
 
-The yankee_shiny folder contains a Shiny app used in Replicating Yankee Institute blogpost.
+https://luceyda.shinyapps.io/yankee_shiny/
+
+The yankee_shiny folder contains the Shiny app used in Replicating Yankee Institute blogpost.
 
